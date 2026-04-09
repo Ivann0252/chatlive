@@ -481,7 +481,10 @@ EMOJIS.forEach(e=>{
 function toggleEmoji(){tray.classList.toggle('open')}
 document.addEventListener('click',e=>{
   if(!e.target.closest('.emoji-btn')&&!e.target.closest('#emoji-tray')) tray.classList.remove('open');
-  if(!e.target.closest('#quick-react')&&!e.target.closest('.ba-btn[data-react]')) closeQuickReact();
+  if(!e.target.closest('#quick-react')&&!e.target.closest('.ba-btn[data-react]')&&!e.target.closest('.ba-btn[title="Réagir"]')) closeQuickReact();
+  if(!e.target.closest('#settings-panel')&&!e.target.closest('.icon-btn[onclick*="toggleSettings"]')) {
+    // don't close settings on outside click — user closes manually
+  }
 });
 
 // ── STATE ──
@@ -535,14 +538,17 @@ function startApp(){
 }
 
 // ── WS ──
+let wsConnecting=false;
 function connectWS(){
-  if(ws){try{ws.close()}catch(e){} ws=null}
+  if(wsConnecting) return;
+  wsConnecting=true;
+  if(ws){try{ws.onclose=null;ws.close()}catch(e){} ws=null}
   const proto=location.protocol==='https:'?'wss':'ws';
   const colorHex=myColor.replace('#','');
   ws=new WebSocket(`${proto}://${location.host}/ws/${currentRoom}/${encodeURIComponent(myUsername)}/${colorHex}`);
-  ws.onopen=()=>{saveUser()};
-  ws.onclose=()=>{setTimeout(()=>{if(!ws||ws.readyState!==WebSocket.OPEN)connectWS()},3000)};
-  ws.onerror=()=>{};
+  ws.onopen=()=>{wsConnecting=false; saveUser()};
+  ws.onclose=()=>{wsConnecting=false; ws=null; setTimeout(()=>{if(!ws) connectWS()},3000)};
+  ws.onerror=()=>{wsConnecting=false;};
   ws.onmessage=e=>handleMsg(JSON.parse(e.data));
 }
 
@@ -987,6 +993,11 @@ function toggleKeepMessages(){
   tog.classList.toggle('on');
   const keep=tog.classList.contains('on');
   if(ws&&ws.readyState===WebSocket.OPEN) ws.send(JSON.stringify({type:'toggle_keep_messages',keep}));
+}
+
+// ── SETTINGS PANEL ──
+function toggleSettings(){
+  document.getElementById('settings-panel').classList.toggle('open');
 }
 
 // ── THEME ──
