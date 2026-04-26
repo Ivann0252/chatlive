@@ -1,13 +1,22 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-import json, sqlite3, base64, os
-from datetime import datetime, timedelta
+from fastapi.responses import HTMLResponse, RedirectResponse
+import json, httpx, os
+from datetime import datetime
+from supabase import create_client, Client
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-DB = "chat.db"
+# ── CONFIG ──
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+APP_URL = os.getenv("APP_URL", "https://chatlive-78y8.onrender.com")
+REDIRECT_URI = f"{APP_URL}/auth/callback"
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def now_time():
     return datetime.now().strftime("%H:%M")
@@ -15,202 +24,207 @@ def now_time():
 def now_full():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-def get_db():
-    con = sqlite3.connect(DB)
-    con.row_factory = sqlite3.Row
-    return con
-
-def init_db():
-    con = get_db()
-    cur = con.cursor()
-    cur.execute("""CREATE TABLE IF NOT EXISTS users (
-        username TEXT PRIMARY KEY,
-        color TEXT,
-        avatar TEXT,
-        status TEXT DEFAULT 'online',
-        pseudo_changed INTEGER DEFAULT 0,
-        keep_messages INTEGER DEFAULT 1,
-        joined_at TEXT,
-        last_active TEXT
-    )""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        room TEXT, username TEXT, color TEXT,
-        text TEXT, msg_type TEXT DEFAULT 'message',
-        edited INTEGER DEFAULT 0,
-        deleted INTEGER DEFAULT 0,
-        pinned INTEGER DEFAULT 0,
-        created_at TEXT,
-        edited_at TEXT
-    )""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS rooms (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE, label TEXT, owner TEXT,
-        is_private INTEGER DEFAULT 0,
-        created_at TEXT
-    )""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS room_members (
-        room_name TEXT, username TEXT, role TEXT DEFAULT 'member',
-        muted INTEGER DEFAULT 0, banned INTEGER DEFAULT 0,
-        PRIMARY KEY (room_name, username)
-    )""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS room_invites (
-        room_name TEXT, username TEXT,
-        PRIMARY KEY (room_name, username)
-    )""")
-    defaults = [("general","💬 General"),("idees","💡 Idées"),("design","🎨 Design"),("gaming","🎮 Gaming")]
-    for name, label in defaults:
-        cur.execute("INSERT OR IGNORE INTO rooms(name,label,owner,is_private,created_at) VALUES(?,?,?,?,?)",
-                    (name, label, None, 0, now_full()))
-    con.commit(); con.close()
-
-def now_full():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-def now_time():
-    return datetime.now().strftime("%H:%M")
-
-def purge_old_messages():
-    con = get_db()
-    cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-    # Only delete messages for users who don't have keep_messages=1
-    con.execute("""DELETE FROM messages WHERE created_at < ? AND username NOT IN (
-        SELECT username FROM users WHERE keep_messages=1
-    ) AND msg_type='message'""", (cutoff,))
-    con.commit(); con.close()
-
-def upsert_user(username, color):
-    con = get_db()
-    existing = con.execute("SELECT username FROM users WHERE username=?", (username,)).fetchone()
-    if not existing:
-        con.execute("INSERT INTO users(username,color,status,joined_at,last_active) VALUES(?,?,'online',?,?)",
-                    (username, color, now_full(), now_full()))
-    else:
-        con.execute("UPDATE users SET status='online', last_active=?, color=? WHERE username=?",
-                    (now_full(), color, username))
-    con.commit(); con.close()
-
-def update_last_active(username):
-    con = get_db()
-    con.execute("UPDATE users SET last_active=? WHERE username=?", (now_full(), username))
-    con.commit(); con.close()
-
-def get_user(username):
-    con = get_db()
-    row = con.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
-    con.close()
-    return dict(row) if row else None
-
-def get_history(room, limit=60):
-    con = get_db()
-    rows = con.execute(
-        """SELECT m.id, m.username, m.color, m.text, m.msg_type, m.edited, m.deleted, m.pinned, m.created_at,
-           u.avatar, u.status
-           FROM messages m LEFT JOIN users u ON m.username=u.username
-           WHERE m.room=? ORDER BY m.id DESC LIMIT ?""",
-        (room, limit)
-    ).fetchall()
-    con.close()
-    result = []
-    for r in reversed(rows):
-        t = datetime.strptime(r['created_at'], "%Y-%m-%d %H:%M:%S").strftime("%H:%M")
-        result.append({
-            "id": r['id'], "username": r['username'], "color": r['color'],
-            "text": "[message supprimé]" if r['deleted'] else r['text'],
-            "type": r['msg_type'], "edited": bool(r['edited']),
-            "deleted": bool(r['deleted']), "pinned": bool(r['pinned']),
-            "time": t, "avatar": r['avatar']
-        })
-    return result
-
-def get_pinned(room):
-    con = get_db()
-    row = con.execute("SELECT id,username,text,created_at FROM messages WHERE room=? AND pinned=1 ORDER BY id DESC LIMIT 1", (room,)).fetchone()
-    con.close()
-    if row:
-        t = datetime.strptime(row['created_at'], "%Y-%m-%d %H:%M:%S").strftime("%H:%M")
-        return {"id": row['id'], "username": row['username'], "text": row['text'], "time": t}
-    return None
-
-def save_message(room, username, color, text, msg_type="message"):
-    con = get_db()
-    cur = con.execute("INSERT INTO messages(room,username,color,text,msg_type,created_at) VALUES(?,?,?,?,?,?)",
-                (room, username, color, text, msg_type, now_full()))
-    msg_id = cur.lastrowid
-    con.commit(); con.close()
-    return msg_id
-
-def get_rooms():
-    con = get_db()
-    rows = con.execute("SELECT name,label,owner,is_private FROM rooms ORDER BY id").fetchall()
-    con.close()
-    return [{"name": r['name'], "label": r['label'], "owner": r['owner'], "is_private": bool(r['is_private'])} for r in rows]
-
-def can_access(room_name, username):
-    con = get_db()
-    row = con.execute("SELECT is_private,owner FROM rooms WHERE name=?", (room_name,)).fetchone()
-    if not row: con.close(); return False
-    if not row['is_private']: con.close(); return True
-    if row['owner'] == username: con.close(); return True
-    banned = con.execute("SELECT banned FROM room_members WHERE room_name=? AND username=?", (room_name, username)).fetchone()
-    if banned and banned['banned']: con.close(); return False
-    invite = con.execute("SELECT 1 FROM room_invites WHERE room_name=? AND username=?", (room_name, username)).fetchone()
-    con.close()
-    return invite is not None
-
-def is_banned(room_name, username):
-    con = get_db()
-    row = con.execute("SELECT banned FROM room_members WHERE room_name=? AND username=?", (room_name, username)).fetchone()
-    con.close()
-    return bool(row and row['banned'])
-
-def is_muted(room_name, username):
-    con = get_db()
-    row = con.execute("SELECT muted FROM room_members WHERE room_name=? AND username=?", (room_name, username)).fetchone()
-    con.close()
-    return bool(row and row['muted'])
-
-def get_role(room_name, username):
-    con = get_db()
-    room = con.execute("SELECT owner FROM rooms WHERE name=?", (room_name,)).fetchone()
-    if room and room['owner'] == username:
-        con.close(); return 'owner'
-    row = con.execute("SELECT role FROM room_members WHERE room_name=? AND username=?", (room_name, username)).fetchone()
-    con.close()
-    return row['role'] if row else 'member'
-
-def count_admins(room_name):
-    con = get_db()
-    count = con.execute("SELECT COUNT(*) as c FROM room_members WHERE room_name=? AND role='admin'", (room_name,)).fetchone()['c']
-    con.close()
-    return count
-
-def get_room_stats(room_name):
-    con = get_db()
-    msg_count = con.execute("SELECT COUNT(*) as c FROM messages WHERE room=? AND deleted=0 AND msg_type='message'", (room_name,)).fetchone()['c']
-    member_count = con.execute("SELECT COUNT(*) as c FROM room_members WHERE room_name=? AND banned=0", (room_name,)).fetchone()['c']
-    con.close()
-    return {"messages": msg_count, "members": member_count + 1}
-
-def count_user_rooms(username, is_private):
-    con = get_db()
-    count = con.execute("SELECT COUNT(*) as c FROM rooms WHERE owner=? AND is_private=?",
-                        (username, 1 if is_private else 0)).fetchone()['c']
-    con.close()
-    return count
-
-def do_create_room(name, label, owner, is_private):
-    con = get_db()
+# ── SUPABASE HELPERS ──
+def db_get_user(google_id: str):
     try:
-        con.execute("INSERT INTO rooms(name,label,owner,is_private,created_at) VALUES(?,?,?,?,?)",
-                    (name, label, owner, 1 if is_private else 0, now_full()))
-        con.commit(); return True
+        res = supabase.table("users").select("*").eq("google_id", google_id).execute()
+        return res.data[0] if res.data else None
+    except: return None
+
+def db_upsert_user(google_id, username, email, avatar, color="#1D9E75"):
+    try:
+        existing = db_get_user(google_id)
+        if existing:
+            supabase.table("users").update({
+                "last_active": now_full(), "status": "online"
+            }).eq("google_id", google_id).execute()
+            return existing
+        else:
+            data = {
+                "google_id": google_id, "username": username, "email": email,
+                "avatar": avatar, "color": color, "status": "online",
+                "pseudo_changed": False, "keep_messages": True,
+                "joined_at": now_full(), "last_active": now_full()
+            }
+            res = supabase.table("users").insert(data).execute()
+            return res.data[0] if res.data else None
+    except Exception as e:
+        print(f"upsert_user error: {e}")
+        return None
+
+def db_get_history(room, limit=60):
+    try:
+        res = supabase.table("messages").select("*").eq("room", room).order("id", desc=True).limit(limit).execute()
+        result = []
+        for r in reversed(res.data or []):
+            result.append({
+                "id": r.get("id"), "username": r.get("username"), "color": r.get("color"),
+                "text": "[message supprimé]" if r.get("deleted") else r.get("text"),
+                "type": r.get("msg_type", "message"), "edited": r.get("edited", False),
+                "deleted": r.get("deleted", False), "pinned": r.get("pinned", False),
+                "time": r.get("created_at", "")[-8:-3] if r.get("created_at") else "",
+                "avatar": r.get("avatar"), "reply_to": r.get("reply_to")
+            })
+        return result
+    except Exception as e:
+        print(f"get_history error: {e}")
+        return []
+
+def db_save_message(room, username, color, text, avatar=None, msg_type="message", reply_to=None):
+    try:
+        data = {
+            "room": room, "username": username, "color": color, "text": text,
+            "avatar": avatar, "msg_type": msg_type, "reply_to": json.dumps(reply_to) if reply_to else None,
+            "edited": False, "deleted": False, "pinned": False, "created_at": now_full()
+        }
+        res = supabase.table("messages").insert(data).execute()
+        return res.data[0]["id"] if res.data else None
+    except Exception as e:
+        print(f"save_message error: {e}")
+        return None
+
+def db_get_rooms():
+    try:
+        res = supabase.table("rooms").select("*").order("id").execute()
+        return res.data or []
+    except: return []
+
+def db_init_rooms():
+    defaults = [
+        {"name": "general", "label": "💬 General", "is_private": False},
+        {"name": "idees", "label": "💡 Idées", "is_private": False},
+        {"name": "design", "label": "🎨 Design", "is_private": False},
+        {"name": "gaming", "label": "🎮 Gaming", "is_private": False},
+    ]
+    for r in defaults:
+        try:
+            existing = supabase.table("rooms").select("name").eq("name", r["name"]).execute()
+            if not existing.data:
+                supabase.table("rooms").insert({**r, "owner": None, "created_at": now_full()}).execute()
+        except: pass
+
+def db_get_pinned(room):
+    try:
+        res = supabase.table("messages").select("*").eq("room", room).eq("pinned", True).order("id", desc=True).limit(1).execute()
+        if res.data:
+            r = res.data[0]
+            return {"id": r["id"], "username": r["username"], "text": r["text"], "time": r.get("created_at","")[-8:-3]}
+        return None
+    except: return None
+
+def db_get_role(room, username):
+    try:
+        room_data = supabase.table("rooms").select("owner").eq("name", room).execute()
+        if room_data.data and room_data.data[0].get("owner") == username:
+            return "owner"
+        res = supabase.table("room_members").select("role").eq("room_name", room).eq("username", username).execute()
+        if res.data:
+            return res.data[0].get("role", "member")
+        return "member"
+    except: return "member"
+
+def db_can_access(room, username):
+    try:
+        res = supabase.table("rooms").select("is_private,owner").eq("name", room).execute()
+        if not res.data: return False
+        r = res.data[0]
+        if not r["is_private"]: return True
+        if r["owner"] == username: return True
+        inv = supabase.table("room_invites").select("id").eq("room_name", room).eq("username", username).execute()
+        return bool(inv.data)
+    except: return True
+
+def db_is_banned(room, username):
+    try:
+        res = supabase.table("room_members").select("banned").eq("room_name", room).eq("username", username).execute()
+        return bool(res.data and res.data[0].get("banned"))
     except: return False
-    finally: con.close()
 
-init_db()
-purge_old_messages()
+def db_is_muted(room, username):
+    try:
+        res = supabase.table("room_members").select("muted").eq("room_name", room).eq("username", username).execute()
+        return bool(res.data and res.data[0].get("muted"))
+    except: return False
 
+def db_count_admins(room):
+    try:
+        res = supabase.table("room_members").select("id").eq("room_name", room).eq("role", "admin").execute()
+        return len(res.data or [])
+    except: return 0
+
+def db_count_user_rooms(username, is_private):
+    try:
+        res = supabase.table("rooms").select("id").eq("owner", username).eq("is_private", is_private).execute()
+        return len(res.data or [])
+    except: return 0
+
+def db_purge_old_messages():
+    try:
+        from datetime import timedelta
+        cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+        keep_users_res = supabase.table("users").select("username").eq("keep_messages", True).execute()
+        keep_users = [u["username"] for u in (keep_users_res.data or [])]
+        res = supabase.table("messages").select("id,username").lt("created_at", cutoff).eq("msg_type", "message").execute()
+        to_delete = [r["id"] for r in (res.data or []) if r["username"] not in keep_users]
+        for mid in to_delete:
+            supabase.table("messages").delete().eq("id", mid).execute()
+    except Exception as e:
+        print(f"purge error: {e}")
+
+db_init_rooms()
+db_purge_old_messages()
+
+# ── GOOGLE AUTH ──
+@app.get("/auth/login")
+async def auth_login():
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "offline",
+    }
+    from urllib.parse import urlencode
+    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
+    return RedirectResponse(url)
+
+@app.get("/auth/callback")
+async def auth_callback(code: str = None, error: str = None):
+    if error or not code:
+        return RedirectResponse(f"/?error=auth_failed")
+    async with httpx.AsyncClient() as client:
+        token_res = await client.post("https://oauth2.googleapis.com/token", data={
+            "code": code, "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": REDIRECT_URI, "grant_type": "authorization_code"
+        })
+        tokens = token_res.json()
+        access_token = tokens.get("access_token")
+        if not access_token:
+            return RedirectResponse("/?error=no_token")
+        user_res = await client.get("https://www.googleapis.com/oauth2/v3/userinfo",
+                                    headers={"Authorization": f"Bearer {access_token}"})
+        user_info = user_res.json()
+
+    google_id = user_info.get("sub")
+    username = user_info.get("name", "User").replace(" ", "_")[:20]
+    email = user_info.get("email", "")
+    avatar = user_info.get("picture", "")
+
+    user = db_upsert_user(google_id, username, email, avatar)
+    if not user:
+        return RedirectResponse("/?error=db_error")
+
+    from urllib.parse import urlencode
+    params = urlencode({
+        "username": user.get("username", username),
+        "color": user.get("color", "#1D9E75"),
+        "avatar": avatar,
+        "google_id": google_id
+    })
+    return RedirectResponse(f"/?{params}")
+
+# ── WS MANAGER ──
 class Manager:
     def __init__(self):
         self.rooms: dict[str, list[dict]] = {}
@@ -218,8 +232,7 @@ class Manager:
 
     async def connect(self, ws, room, username, color, avatar):
         await ws.accept()
-        if room not in self.rooms:
-            self.rooms[room] = []
+        if room not in self.rooms: self.rooms[room] = []
         self.rooms[room].append({"ws": ws, "username": username, "color": color, "avatar": avatar})
         self.connected[username] = room
 
@@ -227,11 +240,9 @@ class Manager:
         username = ""
         if room in self.rooms:
             for c in self.rooms[room]:
-                if c["ws"] == ws:
-                    username = c["username"]; break
+                if c["ws"] == ws: username = c["username"]; break
             self.rooms[room] = [c for c in self.rooms[room] if c["ws"] != ws]
-        if username in self.connected:
-            del self.connected[username]
+        if username in self.connected: del self.connected[username]
         return username
 
     def is_taken(self, username):
@@ -245,15 +256,13 @@ class Manager:
 
     def get_info(self, ws, room):
         for c in self.rooms.get(room, []):
-            if c["ws"] == ws:
-                return c["username"], c["color"], c["avatar"]
+            if c["ws"] == ws: return c["username"], c["color"], c["avatar"]
         return None, None, None
 
     def update_avatar(self, username, avatar):
         for room_list in self.rooms.values():
             for c in room_list:
-                if c["username"] == username:
-                    c["avatar"] = avatar
+                if c["username"] == username: c["avatar"] = avatar
 
     async def broadcast(self, room, msg):
         dead = []
@@ -261,8 +270,7 @@ class Manager:
             try: await c["ws"].send_text(json.dumps(msg))
             except: dead.append(c)
         for d in dead:
-            if room in self.rooms and d in self.rooms[room]:
-                self.rooms[room].remove(d)
+            if room in self.rooms and d in self.rooms[room]: self.rooms[room].remove(d)
 
     async def send_to(self, username, msg):
         room = self.connected.get(username)
@@ -280,47 +288,37 @@ async def endpoint(ws: WebSocket, room: str, username: str, color: str):
 
     if mgr.is_taken(username):
         await ws.accept()
-        await ws.send_text(json.dumps({"type": "error", "code": "username_taken",
-                                       "text": f"Le pseudo '{username}' est déjà utilisé."}))
+        await ws.send_text(json.dumps({"type": "error", "code": "username_taken", "text": f"Le pseudo '{username}' est déjà utilisé."}))
         await ws.close(); return
 
-    if is_banned(room, username):
+    if db_is_banned(room, username):
         await ws.accept()
-        await ws.send_text(json.dumps({"type": "error", "code": "banned",
-                                       "text": "Tu as été banni de ce salon."}))
+        await ws.send_text(json.dumps({"type": "error", "code": "banned", "text": "Tu as été banni de ce salon."}))
         await ws.close(); return
 
-    if not can_access(room, username):
+    if not db_can_access(room, username):
         await ws.accept()
-        await ws.send_text(json.dumps({"type": "error", "code": "access_denied",
-                                       "text": "Tu n'as pas accès à ce salon privé."}))
+        await ws.send_text(json.dumps({"type": "error", "code": "access_denied", "text": "Tu n'as pas accès à ce salon privé."}))
         await ws.close(); return
 
-    upsert_user(username, color)
-    user = get_user(username)
-    avatar = user.get('avatar') if user else None
+    user = db_get_user(username) or {}
+    avatar = user.get("avatar") or ""
 
-    # Add to room_members if not there
-    con = get_db()
-    con.execute("INSERT OR IGNORE INTO room_members(room_name,username,role) VALUES(?,?,'member')", (room, username))
-    con.commit(); con.close()
+    try:
+        supabase.table("room_members").upsert({"room_name": room, "username": username, "role": "member"}, on_conflict="room_name,username").execute()
+    except: pass
 
     await mgr.connect(ws, room, username, color, avatar)
-
-    await ws.send_text(json.dumps({"type": "history", "messages": get_history(room)}))
-    await ws.send_text(json.dumps({"type": "rooms", "rooms": get_rooms()}))
-    await ws.send_text(json.dumps({"type": "my_role", "role": get_role(room, username)}))
-    pinned = get_pinned(room)
-    if pinned:
-        await ws.send_text(json.dumps({"type": "pinned", "message": pinned}))
+    await ws.send_text(json.dumps({"type": "history", "messages": db_get_history(room)}))
+    await ws.send_text(json.dumps({"type": "rooms", "rooms": db_get_rooms()}))
+    await ws.send_text(json.dumps({"type": "my_role", "role": db_get_role(room, username)}))
+    pinned = db_get_pinned(room)
+    if pinned: await ws.send_text(json.dumps({"type": "pinned", "message": pinned}))
     await ws.send_text(json.dumps({"type": "my_profile", "user": user}))
 
     sys_text = f"{username} a rejoint le salon"
-    save_message(room, "system", "", sys_text, "system")
-    await mgr.broadcast(room, {
-        "type": "system", "text": sys_text, "time": now_time(),
-        "members": mgr.get_members(room), "online": mgr.count(room)
-    })
+    db_save_message(room, "system", "", sys_text, msg_type="system")
+    await mgr.broadcast(room, {"type": "system", "text": sys_text, "time": now_time(), "members": mgr.get_members(room), "online": mgr.count(room)})
 
     try:
         while True:
@@ -328,257 +326,208 @@ async def endpoint(ws: WebSocket, room: str, username: str, color: str):
             msg = json.loads(data)
             uname, ucolor, uavatar = mgr.get_info(ws, room)
             if not uname: break
-            update_last_active(uname)
+            try: supabase.table("users").update({"last_active": now_full()}).eq("username", uname).execute()
+            except: pass
             mtype = msg.get("type", "message")
 
             if mtype == "message":
                 text = msg.get("text", "").strip()
                 if not text: continue
-                if is_muted(room, uname):
-                    await ws.send_text(json.dumps({"type": "error", "text": "Tu es en sourdine dans ce salon."}))
-                    continue
-                msg_id = save_message(room, uname, ucolor, text)
-                await mgr.broadcast(room, {
-                    "type": "message", "id": msg_id, "username": uname, "color": ucolor,
-                    "avatar": uavatar, "text": text, "time": now_time(),
-                    "reply_to": msg.get("reply_to"), "edited": False,
-                    "members": mgr.get_members(room), "online": mgr.count(room)
-                })
+                if db_is_muted(room, uname):
+                    await ws.send_text(json.dumps({"type": "error", "text": "Tu es en sourdine."})); continue
+                reply_to = msg.get("reply_to")
+                msg_id = db_save_message(room, uname, ucolor, text, uavatar, reply_to=reply_to)
+                await mgr.broadcast(room, {"type": "message", "id": msg_id, "username": uname, "color": ucolor, "avatar": uavatar, "text": text, "time": now_time(), "reply_to": reply_to, "edited": False, "members": mgr.get_members(room), "online": mgr.count(room)})
 
             elif mtype == "typing":
-                typingCooldown = True
                 for c in mgr.rooms.get(room, []):
                     if c["ws"] != ws:
                         try: await c["ws"].send_text(json.dumps({"type": "typing", "username": uname}))
                         except: pass
 
             elif mtype == "reaction":
-                await mgr.broadcast(room, {"type": "reaction", "msg_id": msg.get("msg_id"),
-                                           "emoji": msg.get("emoji"), "username": uname})
+                await mgr.broadcast(room, {"type": "reaction", "msg_id": msg.get("msg_id"), "emoji": msg.get("emoji"), "username": uname})
 
             elif mtype == "edit_message":
-                msg_id = msg.get("msg_id")
-                new_text = msg.get("text", "").strip()
+                msg_id = msg.get("msg_id"); new_text = msg.get("text", "").strip()
                 if not msg_id or not new_text: continue
-                con = get_db()
-                row = con.execute("SELECT username, created_at FROM messages WHERE id=?", (msg_id,)).fetchone()
-                if row and row['username'] == uname:
-                    created = datetime.strptime(row['created_at'], "%Y-%m-%d %H:%M:%S")
-                    if (datetime.now() - created).seconds <= 300:
-                        con.execute("UPDATE messages SET text=?, edited=1, edited_at=? WHERE id=?",
-                                    (new_text, now_full(), msg_id))
-                        con.commit()
-                        await mgr.broadcast(room, {"type": "message_edited", "msg_id": msg_id,
-                                                   "new_text": new_text, "username": uname})
-                    else:
-                        await ws.send_text(json.dumps({"type": "error", "text": "Modification impossible après 5 minutes."}))
-                con.close()
+                try:
+                    orig = supabase.table("messages").select("username,created_at").eq("id", msg_id).execute()
+                    if orig.data and orig.data[0]["username"] == uname:
+                        created = datetime.strptime(orig.data[0]["created_at"], "%Y-%m-%d %H:%M:%S")
+                        if (datetime.now() - created).seconds <= 300:
+                            supabase.table("messages").update({"text": new_text, "edited": True}).eq("id", msg_id).execute()
+                            await mgr.broadcast(room, {"type": "message_edited", "msg_id": msg_id, "new_text": new_text})
+                        else: await ws.send_text(json.dumps({"type": "error", "text": "Modification impossible après 5 min."}))
+                except: pass
 
             elif mtype == "delete_message":
                 msg_id = msg.get("msg_id")
-                con = get_db()
-                row = con.execute("SELECT username FROM messages WHERE id=?", (msg_id,)).fetchone()
-                role = get_role(room, uname)
-                if row and (row['username'] == uname or role in ['admin','owner']):
-                    con.execute("UPDATE messages SET deleted=1 WHERE id=?", (msg_id,))
-                    con.commit()
-                    await mgr.broadcast(room, {"type": "message_deleted", "msg_id": msg_id})
-                con.close()
+                try:
+                    orig = supabase.table("messages").select("username").eq("id", msg_id).execute()
+                    role = db_get_role(room, uname)
+                    if orig.data and (orig.data[0]["username"] == uname or role in ["admin","owner"]):
+                        supabase.table("messages").update({"deleted": True}).eq("id", msg_id).execute()
+                        await mgr.broadcast(room, {"type": "message_deleted", "msg_id": msg_id})
+                except: pass
 
             elif mtype == "pin_message":
-                role = get_role(room, uname)
-                if role in ['admin', 'owner']:
+                if db_get_role(room, uname) in ["admin","owner"]:
                     msg_id = msg.get("msg_id")
-                    con = get_db()
-                    con.execute("UPDATE messages SET pinned=0 WHERE room=?", (room,))
-                    con.execute("UPDATE messages SET pinned=1 WHERE id=?", (msg_id,))
-                    con.commit(); con.close()
-                    pinned = get_pinned(room)
-                    await mgr.broadcast(room, {"type": "pinned", "message": pinned})
-                else:
-                    await ws.send_text(json.dumps({"type": "error", "text": "Action réservée aux admins."}))
+                    try:
+                        supabase.table("messages").update({"pinned": False}).eq("room", room).execute()
+                        supabase.table("messages").update({"pinned": True}).eq("id", msg_id).execute()
+                        await mgr.broadcast(room, {"type": "pinned", "message": db_get_pinned(room)})
+                    except: pass
 
             elif mtype == "create_room":
-                rname = msg.get("name", "").strip().lower().replace(" ", "-")
-                rlabel = msg.get("label", "").strip()
+                rname = msg.get("name","").strip().lower().replace(" ","-")
+                rlabel = msg.get("label","").strip()
                 is_priv = bool(msg.get("is_private", False))
-                if not rname or not rlabel:
-                    await ws.send_text(json.dumps({"type": "error", "text": "Nom invalide."})); continue
-                if count_user_rooms(uname, is_priv) >= 1:
+                if not rname or not rlabel: await ws.send_text(json.dumps({"type":"error","text":"Nom invalide."})); continue
+                if db_count_user_rooms(uname, is_priv) >= 1:
                     kind = "privé" if is_priv else "public"
-                    await ws.send_text(json.dumps({"type": "error", "text": f"Tu as déjà un salon {kind}."})); continue
-                if do_create_room(rname, rlabel, uname, is_priv):
-                    await ws.send_text(json.dumps({"type": "room_created", "name": rname, "label": rlabel}))
-                    await mgr.broadcast(room, {"type": "rooms", "rooms": get_rooms()})
-                else:
-                    await ws.send_text(json.dumps({"type": "error", "text": "Ce salon existe déjà."}))
+                    await ws.send_text(json.dumps({"type":"error","text":f"Tu as déjà un salon {kind}."})); continue
+                try:
+                    supabase.table("rooms").insert({"name":rname,"label":rlabel,"owner":uname,"is_private":is_priv,"created_at":now_full()}).execute()
+                    await ws.send_text(json.dumps({"type":"room_created","name":rname,"label":rlabel}))
+                    await mgr.broadcast(room, {"type":"rooms","rooms":db_get_rooms()})
+                except: await ws.send_text(json.dumps({"type":"error","text":"Ce salon existe déjà."}))
 
             elif mtype == "invite":
-                invitee = msg.get("username", "").strip()
-                role = get_role(room, uname)
-                if role not in ['admin', 'owner']:
-                    await ws.send_text(json.dumps({"type": "error", "text": "Action réservée aux admins."})); continue
-                con = get_db()
-                con.execute("INSERT OR IGNORE INTO room_invites(room_name,username) VALUES(?,?)", (room, invitee))
-                con.commit(); con.close()
-                await ws.send_text(json.dumps({"type": "info", "text": f"{invitee} a été invité !"}))
-                await mgr.send_to(invitee, {"type": "invited", "room": room, "by": uname})
+                if db_get_role(room, uname) not in ["admin","owner"]: await ws.send_text(json.dumps({"type":"error","text":"Réservé aux admins."})); continue
+                invitee = msg.get("username","").strip()
+                try:
+                    supabase.table("room_invites").upsert({"room_name":room,"username":invitee}, on_conflict="room_name,username").execute()
+                    await ws.send_text(json.dumps({"type":"info","text":f"{invitee} a été invité !"}))
+                    await mgr.send_to(invitee, {"type":"invited","room":room,"by":uname})
+                except: pass
 
             elif mtype == "add_admin":
-                if get_role(room, uname) != 'owner':
-                    await ws.send_text(json.dumps({"type": "error", "text": "Réservé au créateur."})); continue
-                target = msg.get("username", "").strip()
-                if count_admins(room) >= 2:
-                    await ws.send_text(json.dumps({"type": "error", "text": "Maximum 2 admins par salon."})); continue
-                con = get_db()
-                con.execute("INSERT OR REPLACE INTO room_members(room_name,username,role) VALUES(?,?,'admin')", (room, target))
-                con.commit(); con.close()
-                await ws.send_text(json.dumps({"type": "info", "text": f"{target} est maintenant admin !"}))
-                await mgr.send_to(target, {"type": "role_update", "room": room, "role": "admin"})
+                if db_get_role(room, uname) != "owner": await ws.send_text(json.dumps({"type":"error","text":"Réservé au créateur."})); continue
+                target = msg.get("username","").strip()
+                if db_count_admins(room) >= 2: await ws.send_text(json.dumps({"type":"error","text":"Maximum 2 admins."})); continue
+                try:
+                    supabase.table("room_members").upsert({"room_name":room,"username":target,"role":"admin"}, on_conflict="room_name,username").execute()
+                    await ws.send_text(json.dumps({"type":"info","text":f"{target} est admin !"}))
+                    await mgr.send_to(target, {"type":"role_update","room":room,"role":"admin"})
+                except: pass
 
             elif mtype == "ban_admin":
-                if get_role(room, uname) != 'owner':
-                    await ws.send_text(json.dumps({"type": "error", "text": "Réservé au créateur."})); continue
-                target = msg.get("username", "").strip()
-                con = get_db()
-                con.execute("UPDATE room_members SET role='member' WHERE room_name=? AND username=?", (room, target))
-                con.commit(); con.close()
-                await ws.send_text(json.dumps({"type": "info", "text": f"{target} n'est plus admin."}))
+                if db_get_role(room, uname) != "owner": await ws.send_text(json.dumps({"type":"error","text":"Réservé au créateur."})); continue
+                target = msg.get("username","").strip()
+                try:
+                    supabase.table("room_members").update({"role":"member"}).eq("room_name",room).eq("username",target).execute()
+                    await ws.send_text(json.dumps({"type":"info","text":f"{target} n'est plus admin."}))
+                except: pass
 
             elif mtype == "ban_member":
-                role = get_role(room, uname)
-                if role not in ['admin', 'owner']:
-                    await ws.send_text(json.dumps({"type": "error", "text": "Réservé aux admins."})); continue
-                target = msg.get("username", "").strip()
-                if get_role(room, target) == 'owner':
-                    await ws.send_text(json.dumps({"type": "error", "text": "Impossible de bannir le créateur."})); continue
-                con = get_db()
-                con.execute("INSERT OR REPLACE INTO room_members(room_name,username,role,banned) VALUES(?,?,'member',1)", (room, target))
-                con.commit(); con.close()
-                await mgr.send_to(target, {"type": "error", "code": "banned", "text": "Tu as été banni de ce salon."})
-                await ws.send_text(json.dumps({"type": "info", "text": f"{target} a été banni."}))
+                if db_get_role(room, uname) not in ["admin","owner"]: await ws.send_text(json.dumps({"type":"error","text":"Réservé aux admins."})); continue
+                target = msg.get("username","").strip()
+                try:
+                    supabase.table("room_members").upsert({"room_name":room,"username":target,"role":"member","banned":True}, on_conflict="room_name,username").execute()
+                    await mgr.send_to(target, {"type":"error","code":"banned","text":"Tu as été banni."})
+                    await ws.send_text(json.dumps({"type":"info","text":f"{target} banni."}))
+                except: pass
 
             elif mtype == "mute_member":
-                role = get_role(room, uname)
-                if role not in ['admin', 'owner']:
-                    await ws.send_text(json.dumps({"type": "error", "text": "Réservé aux admins."})); continue
-                target = msg.get("username", "").strip()
+                if db_get_role(room, uname) not in ["admin","owner"]: await ws.send_text(json.dumps({"type":"error","text":"Réservé aux admins."})); continue
+                target = msg.get("username","").strip()
                 muted = bool(msg.get("muted", True))
-                con = get_db()
-                con.execute("INSERT OR IGNORE INTO room_members(room_name,username) VALUES(?,?)", (room, target))
-                con.execute("UPDATE room_members SET muted=? WHERE room_name=? AND username=?", (1 if muted else 0, room, target))
-                con.commit(); con.close()
-                status = "mis en sourdine" if muted else "réactivé"
-                await ws.send_text(json.dumps({"type": "info", "text": f"{target} a été {status}."}))
+                try:
+                    supabase.table("room_members").upsert({"room_name":room,"username":target,"muted":muted}, on_conflict="room_name,username").execute()
+                    await ws.send_text(json.dumps({"type":"info","text":f"{target} {'mis en sourdine' if muted else 'réactivé'}."}))
+                except: pass
 
             elif mtype == "rename_room":
-                if get_role(room, uname) != 'owner':
-                    await ws.send_text(json.dumps({"type": "error", "text": "Réservé au créateur."})); continue
-                new_label = msg.get("label", "").strip()
-                if not new_label: continue
-                con = get_db()
-                con.execute("UPDATE rooms SET label=? WHERE name=?", (new_label, room))
-                con.commit(); con.close()
-                await mgr.broadcast(room, {"type": "rooms", "rooms": get_rooms(),
-                                           "info": f"Salon renommé : {new_label}"})
+                if db_get_role(room, uname) != "owner": await ws.send_text(json.dumps({"type":"error","text":"Réservé au créateur."})); continue
+                new_label = msg.get("label","").strip()
+                if new_label:
+                    try:
+                        supabase.table("rooms").update({"label":new_label}).eq("name",room).execute()
+                        await mgr.broadcast(room, {"type":"rooms","rooms":db_get_rooms()})
+                    except: pass
 
             elif mtype == "delete_room":
-                if get_role(room, uname) != 'owner':
-                    await ws.send_text(json.dumps({"type": "error", "text": "Réservé au créateur."})); continue
-                con = get_db()
-                con.execute("DELETE FROM rooms WHERE name=?", (room,))
-                con.commit(); con.close()
-                await mgr.broadcast(room, {"type": "room_deleted", "room": room,
-                                           "text": f"Le salon '{room}' a été supprimé."})
+                if db_get_role(room, uname) != "owner": await ws.send_text(json.dumps({"type":"error","text":"Réservé au créateur."})); continue
+                try:
+                    supabase.table("rooms").delete().eq("name",room).execute()
+                    await mgr.broadcast(room, {"type":"room_deleted","room":room,"text":f"Salon '{room}' supprimé."})
+                except: pass
 
             elif mtype == "room_stats":
-                role = get_role(room, uname)
-                if role not in ['admin', 'owner']:
-                    await ws.send_text(json.dumps({"type": "error", "text": "Réservé aux admins."})); continue
-                stats = get_room_stats(room)
-                await ws.send_text(json.dumps({"type": "room_stats", "stats": stats}))
+                if db_get_role(room, uname) not in ["admin","owner"]: continue
+                try:
+                    msgs = supabase.table("messages").select("id",count="exact").eq("room",room).eq("deleted",False).execute()
+                    mems = supabase.table("room_members").select("id",count="exact").eq("room_name",room).eq("banned",False).execute()
+                    await ws.send_text(json.dumps({"type":"room_stats","stats":{"messages":msgs.count or 0,"members":(mems.count or 0)+1}}))
+                except: pass
 
             elif mtype == "update_status":
-                new_status = msg.get("status", "online")
-                con = get_db()
-                con.execute("UPDATE users SET status=? WHERE username=?", (new_status, uname))
-                con.commit(); con.close()
-                await mgr.broadcast(room, {"type": "status_update", "username": uname, "status": new_status,
-                                           "members": mgr.get_members(room)})
+                try:
+                    supabase.table("users").update({"status":msg.get("status","online")}).eq("username",uname).execute()
+                    await mgr.broadcast(room, {"type":"status_update","username":uname,"status":msg.get("status"),"members":mgr.get_members(room)})
+                except: pass
 
             elif mtype == "update_avatar":
-                avatar_data = msg.get("avatar", "")
-                con = get_db()
-                con.execute("UPDATE users SET avatar=? WHERE username=?", (avatar_data, uname))
-                con.commit(); con.close()
-                mgr.update_avatar(uname, avatar_data)
-                await mgr.broadcast(room, {"type": "avatar_update", "username": uname, "avatar": avatar_data,
-                                           "members": mgr.get_members(room)})
+                avatar_data = msg.get("avatar","")
+                try:
+                    supabase.table("users").update({"avatar":avatar_data}).eq("username",uname).execute()
+                    mgr.update_avatar(uname, avatar_data)
+                    await mgr.broadcast(room, {"type":"avatar_update","username":uname,"avatar":avatar_data,"members":mgr.get_members(room)})
+                except: pass
 
             elif mtype == "change_pseudo":
-                con = get_db()
-                row = con.execute("SELECT pseudo_changed FROM users WHERE username=?", (uname,)).fetchone()
-                if row and row['pseudo_changed']:
-                    await ws.send_text(json.dumps({"type": "error", "text": "Tu as déjà changé ton pseudo une fois."}))
-                    con.close(); continue
-                new_pseudo = msg.get("pseudo", "").strip()
-                if not new_pseudo or mgr.is_taken(new_pseudo):
-                    await ws.send_text(json.dumps({"type": "error", "text": "Pseudo invalide ou déjà utilisé."}))
-                    con.close(); continue
-                con.execute("UPDATE users SET username=?, pseudo_changed=1 WHERE username=?", (new_pseudo, uname))
-                con.commit(); con.close()
-                await ws.send_text(json.dumps({"type": "pseudo_changed", "new_pseudo": new_pseudo,
-                                               "text": "Pseudo changé ! Reconnecte-toi avec ton nouveau pseudo."}))
+                try:
+                    user_row = supabase.table("users").select("pseudo_changed").eq("username",uname).execute()
+                    if user_row.data and user_row.data[0].get("pseudo_changed"):
+                        await ws.send_text(json.dumps({"type":"error","text":"Tu as déjà changé ton pseudo une fois."})); continue
+                    new_pseudo = msg.get("pseudo","").strip()
+                    if not new_pseudo or mgr.is_taken(new_pseudo):
+                        await ws.send_text(json.dumps({"type":"error","text":"Pseudo invalide ou déjà utilisé."})); continue
+                    supabase.table("users").update({"username":new_pseudo,"pseudo_changed":True}).eq("username",uname).execute()
+                    await ws.send_text(json.dumps({"type":"pseudo_changed","new_pseudo":new_pseudo,"text":"Pseudo changé ! Reconnecte-toi."}))
+                except: pass
 
             elif mtype == "get_profile":
-                target = msg.get("username", "").strip()
-                con = get_db()
-                row = con.execute("SELECT username,color,avatar,status,joined_at,last_active FROM users WHERE username=?",
-                                  (target,)).fetchone()
-                con.close()
-                if row:
-                    la = row['last_active']
-                    if la:
-                        try:
-                            diff = datetime.now() - datetime.strptime(la, "%Y-%m-%d %H:%M:%S")
-                            if diff.seconds < 60: la_str = "À l'instant"
-                            elif diff.seconds < 3600: la_str = f"Il y a {diff.seconds//60} min"
-                            elif diff.days == 0: la_str = f"Il y a {diff.seconds//3600}h"
-                            else: la_str = f"Il y a {diff.days} jour(s)"
-                        except: la_str = la
-                    else: la_str = "Inconnu"
-                    ja = row['joined_at']
-                    if ja:
+                target = msg.get("username","").strip()
+                try:
+                    res = supabase.table("users").select("*").eq("username",target).execute()
+                    if res.data:
+                        u = res.data[0]
+                        la = u.get("last_active","")
+                        if la:
+                            try:
+                                diff = datetime.now() - datetime.strptime(la, "%Y-%m-%d %H:%M:%S")
+                                if diff.seconds < 60: la_str = "À l'instant"
+                                elif diff.seconds < 3600: la_str = f"Il y a {diff.seconds//60} min"
+                                elif diff.days == 0: la_str = f"Il y a {diff.seconds//3600}h"
+                                else: la_str = f"Il y a {diff.days} jour(s)"
+                            except: la_str = la
+                        else: la_str = "Inconnu"
+                        ja = u.get("joined_at","")
                         try: ja_str = datetime.strptime(ja, "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y")
                         except: ja_str = ja
-                    else: ja_str = "Inconnu"
-                    await ws.send_text(json.dumps({"type": "profile", "user": {
-                        "username": row['username'], "color": row['color'],
-                        "avatar": row['avatar'], "status": row['status'],
-                        "joined_at": ja_str, "last_active": la_str
-                    }}))
+                        await ws.send_text(json.dumps({"type":"profile","user":{"username":u["username"],"color":u.get("color","#1D9E75"),"avatar":u.get("avatar"),"status":u.get("status","online"),"joined_at":ja_str,"last_active":la_str,"email":u.get("email","")}}))
+                except: pass
 
             elif mtype == "toggle_keep_messages":
                 keep = bool(msg.get("keep", True))
-                con = get_db()
-                con.execute("UPDATE users SET keep_messages=? WHERE username=?", (1 if keep else 0, uname))
-                con.commit(); con.close()
-                await ws.send_text(json.dumps({"type": "info", "text": "Préférence sauvegardée."}))
+                try:
+                    supabase.table("users").update({"keep_messages":keep}).eq("username",uname).execute()
+                    await ws.send_text(json.dumps({"type":"info","text":"Préférence sauvegardée."}))
+                except: pass
 
     except WebSocketDisconnect:
         uname = mgr.disconnect(ws, room)
         if uname:
-            con = get_db()
-            con.execute("UPDATE users SET status='offline', last_active=? WHERE username=?", (now_full(), uname))
-            con.commit(); con.close()
+            try: supabase.table("users").update({"status":"offline","last_active":now_full()}).eq("username",uname).execute()
+            except: pass
             sys_text = f"{uname} a quitté le salon"
-            save_message(room, "system", "", sys_text, "system")
-            await mgr.broadcast(room, {
-                "type": "system", "text": sys_text, "time": now_time(),
-                "members": mgr.get_members(room), "online": mgr.count(room)
-            })
+            db_save_message(room, "system", "", sys_text, msg_type="system")
+            await mgr.broadcast(room, {"type":"system","text":sys_text,"time":now_time(),"members":mgr.get_members(room),"online":mgr.count(room)})
 
 @app.get("/")
 async def root():
-    with open("index.html", "r", encoding="utf-8") as f:
+    with open("index.html","r",encoding="utf-8") as f:
         return HTMLResponse(f.read())
