@@ -833,9 +833,13 @@ function handleMsg(msg){
     } else showToast(msg.text,'error');
   } else if(t==='history'){
     document.getElementById('messages').innerHTML=''; reactions[currentRoom]={};
-    msg.messages.forEach(m=>{ if(m.type==='system') appendSys(m.text); else appendMsg(m); });
+    msg.messages.forEach(m=>{ if(m.type!=='system') appendMsg(m); });
     scrollBottom();
-  } else if(t==='system'){ appendSys(msg.text); scrollBottom(); }
+  } else if(t==='system'){
+    // Notification discrète au lieu d'un message dans le chat
+    const isJoin = msg.text.includes('a rejoint');
+    showMemberNotif(msg.text, isJoin ? 'join' : 'leave');
+  }
   else if(t==='message'){ appendMsg(msg); if(msg.username!==myUsername) playNotif(); scrollBottom(); }
   else if(t==='typing'){ showTyping(msg.username); }
   else if(t==='reaction'){ applyReaction(msg.msg_id,msg.emoji,msg.username); }
@@ -1000,7 +1004,26 @@ function handleInput(){
   setTimeout(()=>{ typingCooldown=false; },2000);
 }
 
-// ══ TYPING ══
+// ══ MEMBER NOTIFICATION ══
+let memberNotifTimer;
+function showMemberNotif(text, type){
+  let notif=document.getElementById('member-notif');
+  if(!notif){
+    notif=document.createElement('div');
+    notif.id='member-notif';
+    notif.style.cssText='position:fixed;top:60px;left:50%;transform:translateX(-50%) translateY(-80px);padding:7px 16px;border-radius:30px;font-size:13px;font-weight:500;z-index:998;transition:transform .3s ease;pointer-events:none;white-space:nowrap;border:1px solid';
+    document.body.appendChild(notif);
+  }
+  notif.textContent=(type==='join'?'🟢 ':'🔴 ')+text;
+  notif.style.background=type==='join'?'rgba(29,158,117,0.15)':'rgba(226,75,74,0.15)';
+  notif.style.borderColor=type==='join'?'rgba(29,158,117,0.4)':'rgba(226,75,74,0.4)';
+  notif.style.color=type==='join'?'var(--accent2)':'var(--danger)';
+  notif.style.transform='translateX(-50%) translateY(0)';
+  clearTimeout(memberNotifTimer);
+  memberNotifTimer=setTimeout(()=>{ notif.style.transform='translateX(-50%) translateY(-80px)'; },3000);
+}
+
+
 let typingTimeout;
 function showTyping(username){ const row=document.getElementById('typing-row'); document.getElementById('typing-label').textContent=username+' écrit...'; row.style.visibility='visible'; clearTimeout(typingTimeout); typingTimeout=setTimeout(()=>{ row.style.visibility='hidden'; },2500); }
 
