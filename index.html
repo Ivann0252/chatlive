@@ -313,7 +313,124 @@ body.light{--bg:#f0f2f5;--surface:#fff;--surface2:#f0f1f4;--surface3:#e4e6eb;--b
 
 @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
 @keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}
-@media(max-width:580px){.sidebar{display:none}}
+
+/* ══ DM BUTTON ══ */
+.dm-fab{
+  position:fixed;bottom:80px;right:16px;
+  width:52px;height:52px;border-radius:50%;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  border:none;cursor:pointer;display:none;
+  align-items:center;justify-content:center;
+  box-shadow:0 4px 20px rgba(29,158,117,0.4);
+  transition:transform .2s,box-shadow .2s;z-index:40;
+  font-family:'Syne',sans-serif;font-weight:800;font-size:13px;color:white;
+  flex-direction:column;gap:1px;
+}
+.dm-fab:hover{transform:scale(1.1);box-shadow:0 6px 28px rgba(29,158,117,0.5)}
+.dm-fab.has-notif::after{content:'';position:absolute;top:6px;right:6px;width:10px;height:10px;background:var(--danger);border-radius:50%;border:2px solid var(--bg)}
+
+/* ══ DM PANEL ══ */
+#dm-panel{
+  position:fixed;top:0;right:0;bottom:0;width:340px;
+  background:var(--surface);border-left:1px solid var(--border);
+  z-index:120;transform:translateX(100%);transition:transform .3s ease;
+  display:flex;flex-direction:column;
+}
+#dm-panel.open{transform:translateX(0)}
+.dm-header{padding:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0}
+.dm-header h3{font-family:'Syne',sans-serif;font-size:16px;font-weight:700;flex:1}
+.dm-tabs{display:flex;gap:6px;padding:10px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.dm-tab{flex:1;padding:7px;border-radius:var(--radius-sm);font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--border2);background:transparent;color:var(--muted);transition:all .15s;text-align:center}
+.dm-tab.active{background:var(--accent);color:white;border-color:var(--accent)}
+.dm-list{flex:1;overflow-y:auto;padding:10px}
+.dm-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);cursor:pointer;transition:background .15s;border:1px solid transparent}
+.dm-item:hover{background:var(--surface2);border-color:var(--border)}
+.dm-item.active{background:var(--accent-dim);border-color:var(--accent)}
+.dm-av{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;overflow:hidden}
+.dm-av img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.dm-info{flex:1;min-width:0}
+.dm-name{font-size:14px;font-weight:500}
+.dm-preview{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dm-req-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:8px;border:1px solid var(--border)}
+.dm-req-btns{display:flex;gap:6px;flex-shrink:0}
+.dm-req-btn{padding:5px 10px;border-radius:var(--radius-xs);font-size:12px;border:none;cursor:pointer;font-weight:500;transition:all .15s}
+.dm-req-btn.accept{background:var(--accent);color:white}
+.dm-req-btn.refuse{background:var(--surface3);color:var(--muted)}
+.dm-search{padding:10px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.dm-search input{width:100%;padding:9px 14px;background:var(--surface2);border:1px solid var(--border2);border-radius:20px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;outline:none}
+.dm-search input:focus{border-color:var(--accent)}
+.dm-send-btn{padding:8px 14px;background:var(--accent);color:white;border:none;border-radius:20px;font-size:13px;cursor:pointer;flex-shrink:0;transition:background .2s}
+.dm-send-btn:hover{background:#0F6E56}
+
+/* ══ DM CHAT ══ */
+#dm-chat{
+  position:fixed;top:0;right:0;bottom:0;width:340px;
+  background:var(--surface);border-left:1px solid var(--border);
+  z-index:130;transform:translateX(100%);transition:transform .3s ease;
+  display:flex;flex-direction:column;
+}
+#dm-chat.open{transform:translateX(0)}
+.dm-chat-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0}
+.dm-chat-av{width:36px;height:36px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.dm-chat-av img{width:100%;height:100%;object-fit:cover}
+.dm-chat-name{font-family:'Syne',sans-serif;font-size:15px;font-weight:600;flex:1}
+.dm-messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.dm-messages::-webkit-scrollbar{width:3px}
+.dm-messages::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+.dm-msg{display:flex;gap:8px;align-items:flex-end;animation:fadeUp .2s ease}
+.dm-msg.me{flex-direction:row-reverse}
+.dm-msg-av{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;overflow:hidden}
+.dm-msg-av img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.dm-bubble{max-width:75%;padding:8px 12px;border-radius:14px 14px 14px 4px;background:var(--surface2);border:1px solid var(--border);font-size:14px;line-height:1.5;word-break:break-word;position:relative}
+.dm-msg.me .dm-bubble{border-radius:14px 14px 4px 14px;background:var(--accent);border-color:var(--accent);color:white}
+.dm-time{font-size:10px;color:var(--muted);margin-top:2px;padding:0 4px}
+.dm-typing{font-size:12px;color:var(--muted);padding:4px 8px;min-height:20px}
+.dm-input-area{padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0}
+.dm-input-wrap{flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:20px;display:flex;align-items:center;padding:8px 14px;transition:border .2s}
+.dm-input-wrap:focus-within{border-color:var(--accent)}
+.dm-input-wrap input{flex:1;border:none;background:none;outline:none;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px}
+.dm-input-wrap input::placeholder{color:var(--muted2)}
+.dm-send{width:36px;height:36px;border-radius:50%;background:var(--accent);border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:background .2s}
+.dm-send:hover{background:#0F6E56}
+.dm-send svg{fill:white}
+
+/* ══ MOBILE NAV ══ */
+.mobile-nav{
+  display:none;position:fixed;bottom:0;left:0;right:0;
+  background:var(--surface);border-top:1px solid var(--border);
+  padding:8px 0 calc(8px + env(safe-area-inset-bottom));
+  z-index:50;
+}
+.mobile-nav-items{display:flex;justify-content:space-around}
+.mobile-nav-btn{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 16px;border:none;background:none;cursor:pointer;color:var(--muted);transition:color .15s;position:relative}
+.mobile-nav-btn.active{color:var(--accent)}
+.mobile-nav-btn span{font-size:10px;font-weight:500}
+.mobile-nav-btn .notif-dot{position:absolute;top:4px;right:10px;width:8px;height:8px;background:var(--danger);border-radius:50%;border:2px solid var(--surface);display:none}
+.mobile-nav-btn .notif-dot.show{display:block}
+.mobile-sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:80}
+.mobile-sidebar-overlay.open{display:block}
+.mobile-sidebar{position:fixed;left:0;top:0;bottom:0;width:260px;background:var(--surface);border-right:1px solid var(--border);z-index:90;transform:translateX(-100%);transition:transform .3s;padding:16px 12px;overflow-y:auto}
+.mobile-sidebar.open{transform:translateX(0)}
+
+/* ══ RESPONSIVE ══ */
+@media(max-width:768px){
+  .sidebar{display:none}
+  .online-badge{display:none}
+  .dm-fab{display:none}
+  .mobile-nav{display:block}
+  #app{padding-bottom:65px}
+  .room-pills{max-width:calc(100vw - 160px)}
+  #dm-panel,#dm-chat{width:100%;border-left:none}
+  .topbar{padding:8px 12px}
+  .input-bar{padding:8px 10px}
+  .emoji-btn{display:none}
+  #messages{padding:12px}
+}
+@media(min-width:769px){
+  .dm-fab{display:flex}
+  .mobile-nav{display:none}
+  .mobile-sidebar{display:none}
+}
 </style>
 </head>
 <body>
@@ -390,7 +507,83 @@ body.light{--bg:#f0f2f5;--surface:#fff;--surface2:#f0f1f4;--surface3:#e4e6eb;--b
   </div>
 </div>
 
-<!-- EMOJI TRAY -->
+<!-- ══ DM FAB (desktop) ══ -->
+<button class="dm-fab" id="dm-fab" onclick="toggleDmPanel()" title="Messages privés">
+  <span style="font-size:18px">💬</span>
+  <span style="font-size:9px;letter-spacing:.5px">MP</span>
+</button>
+
+<!-- ══ DM PANEL ══ -->
+<div id="dm-panel">
+  <div class="dm-header">
+    <h3>💬 Messages Privés</h3>
+    <button class="icon-btn" onclick="toggleDmPanel()" style="font-size:18px">×</button>
+  </div>
+  <div class="dm-search">
+    <input id="dm-search-input" placeholder="Envoyer une demande à... (pseudo exact)" onkeydown="if(event.key==='Enter')sendDmRequest()"/>
+  </div>
+  <div class="dm-tabs">
+    <button class="dm-tab active" onclick="showDmTab('convs')">Conversations</button>
+    <button class="dm-tab" onclick="showDmTab('requests')" id="dm-req-tab">Demandes</button>
+  </div>
+  <div class="dm-list" id="dm-convs-list"></div>
+  <div class="dm-list" id="dm-requests-list" style="display:none"></div>
+  <div style="padding:10px 16px;border-top:1px solid var(--border);flex-shrink:0">
+    <button class="modal-btn primary" style="width:100%" onclick="sendDmRequest()">Envoyer une demande →</button>
+  </div>
+</div>
+
+<!-- ══ DM CHAT ══ -->
+<div id="dm-chat">
+  <div class="dm-chat-header">
+    <button class="icon-btn" onclick="closeDmChat()">←</button>
+    <div class="dm-chat-av" id="dm-chat-av"></div>
+    <div class="dm-chat-name" id="dm-chat-name"></div>
+  </div>
+  <div class="dm-messages" id="dm-messages"></div>
+  <div class="dm-typing" id="dm-typing"></div>
+  <div class="dm-input-area">
+    <div class="dm-input-wrap">
+      <input id="dm-msg-input" type="text" placeholder="Message privé..." onkeydown="if(event.key==='Enter')sendDmMsg()"/>
+    </div>
+    <button class="dm-send" onclick="sendDmMsg()"><svg width="14" height="14" viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></button>
+  </div>
+</div>
+
+<!-- ══ MOBILE SIDEBAR ══ -->
+<div class="mobile-sidebar-overlay" id="mob-overlay" onclick="closeMobileSidebar()"></div>
+<div class="mobile-sidebar" id="mob-sidebar">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <span style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">Membres</span>
+    <button class="icon-btn" onclick="closeMobileSidebar()" style="font-size:18px">×</button>
+  </div>
+  <div id="mob-members-list"></div>
+</div>
+
+<!-- ══ MOBILE NAV ══ -->
+<nav class="mobile-nav">
+  <div class="mobile-nav-items">
+    <button class="mobile-nav-btn active" id="mob-btn-chat" onclick="mobileNav('chat')">
+      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>Salons</span>
+    </button>
+    <button class="mobile-nav-btn" id="mob-btn-mp" onclick="mobileNav('mp')">
+      <div class="notif-dot" id="mob-mp-dot"></div>
+      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      <span>MP</span>
+    </button>
+    <button class="mobile-nav-btn" id="mob-btn-members" onclick="mobileNav('members')">
+      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span>Membres</span>
+    </button>
+    <button class="mobile-nav-btn" id="mob-btn-settings" onclick="mobileNav('settings')">
+      <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span>Profil</span>
+    </button>
+  </div>
+</nav>
+
+
 <div id="emoji-tray"></div>
 <div id="quick-react">
   <span class="qr-em" onclick="doReact('👍')">👍</span>
@@ -600,6 +793,7 @@ function startApp(){
   updateMyAvatarTopbar();
   buildPills([]);
   connectWS();
+  setTimeout(connectDmWS, 1000);
 }
 
 function updateMyAvatarTopbar(){
@@ -930,7 +1124,224 @@ function toggleKeepMessages(){
 // ══ SETTINGS ══
 function toggleSettings(){ document.getElementById('settings-panel').classList.toggle('open'); }
 
-// ══ THEME ══
+
+// ══ DM SYSTEM ══
+let dmWs=null, dmWsConnecting=false;
+let currentDmTarget='', currentDmConvId='';
+let dmConvs=[], dmRequests=[];
+
+function connectDmWS(){
+  if(dmWsConnecting||dmWs) return;
+  dmWsConnecting=true;
+  const proto=location.protocol==='https:'?'wss':'ws';
+  const colorHex=myColor.replace('#','');
+  dmWs=new WebSocket(`${proto}://${location.host}/dm/${encodeURIComponent(myUsername)}/${colorHex}`);
+  dmWs.onopen=()=>{ dmWsConnecting=false; };
+  dmWs.onclose=()=>{ dmWsConnecting=false; dmWs=null; setTimeout(()=>{ if(!dmWs) connectDmWS(); },4000); };
+  dmWs.onerror=()=>{ dmWsConnecting=false; };
+  dmWs.onmessage=e=>handleDmMsg(JSON.parse(e.data));
+}
+
+function handleDmMsg(msg){
+  const t=msg.type;
+  if(t==='dm_list'){
+    dmConvs=msg.dms||[];
+    renderDmConvs();
+  } else if(t==='dm_pending_requests'){
+    dmRequests=msg.requests||[];
+    renderDmRequests();
+    document.getElementById('dm-fab')?.classList.toggle('has-notif', dmRequests.length>0);
+    const dot=document.getElementById('mob-mp-dot');
+    if(dot) dot.classList.toggle('show', dmRequests.length>0);
+  } else if(t==='dm_new_request'){
+    showToast(`Nouvelle demande de ${msg.from_user} !`,'info');
+    document.getElementById('dm-fab')?.classList.add('has-notif');
+    const dot=document.getElementById('mob-mp-dot');
+    if(dot) dot.classList.add('show');
+    if(dmWs&&dmWs.readyState===WebSocket.OPEN){
+      dmWs.send(JSON.stringify({type:'dm_open',target:msg.from_user}));
+    }
+    dmRequests.push({from_user:msg.from_user,to_user:myUsername,status:'pending'});
+    renderDmRequests();
+  } else if(t==='dm_accepted'){
+    showToast(`${msg.by} a accepté ta demande !`,'success');
+    if(dmWs&&dmWs.readyState===WebSocket.OPEN) dmWs.send(JSON.stringify({type:'dm_open',target:msg.by}));
+  } else if(t==='dm_history'){
+    currentDmTarget=msg.target;
+    currentDmConvId=msg.conv_id;
+    renderDmHistory(msg.messages, msg.target);
+    openDmChat(msg.target);
+  } else if(t==='dm_message'){
+    if(msg.conv_id===currentDmConvId) appendDmMsg(msg);
+    else { showToast(`MP de ${msg.from_user}`,'info'); playNotif(); }
+  } else if(t==='dm_typing'){
+    if(msg.from_user===currentDmTarget){
+      const el=document.getElementById('dm-typing');
+      if(el){ el.textContent=`${msg.from_user} écrit...`; setTimeout(()=>{ el.textContent=''; },2000); }
+    }
+  } else if(t==='dm_deleted'){
+    if(msg.conv_id===currentDmConvId){
+      const el=document.querySelector(`[data-dmid="${msg.msg_id}"] .dm-bubble-text`);
+      if(el){ el.textContent='[message supprimé]'; el.style.cssText='color:var(--muted);font-style:italic'; }
+    }
+  } else if(t==='info'){ showToast(msg.text,'success'); }
+  else if(t==='error'){ showToast(msg.text,'error'); }
+}
+
+function toggleDmPanel(){
+  const panel=document.getElementById('dm-panel');
+  panel.classList.toggle('open');
+  if(panel.classList.contains('open')) connectDmWS();
+}
+
+function showDmTab(tab){
+  document.querySelectorAll('.dm-tab').forEach(t=>t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('dm-convs-list').style.display=tab==='convs'?'block':'none';
+  document.getElementById('dm-requests-list').style.display=tab==='requests'?'block':'none';
+}
+
+function renderDmConvs(){
+  const c=document.getElementById('dm-convs-list'); c.innerHTML='';
+  if(!dmConvs.length){
+    c.innerHTML='<div style="text-align:center;color:var(--muted);padding:30px;font-size:13px">Aucune conversation<br><small>Envoie une demande pour commencer !</small></div>';
+    return;
+  }
+  dmConvs.forEach(dm=>{
+    const other=dm.from_user===myUsername?dm.to_user:dm.from_user;
+    const div=document.createElement('div'); div.className='dm-item';
+    div.innerHTML=`<div class="dm-av" style="background:var(--surface3);color:var(--accent2)">${other.slice(0,2).toUpperCase()}</div><div class="dm-info"><div class="dm-name">${esc(other)}</div><div class="dm-preview">Cliquer pour ouvrir</div></div>`;
+    div.onclick=()=>{
+      document.querySelectorAll('.dm-item').forEach(i=>i.classList.remove('active'));
+      div.classList.add('active');
+      if(dmWs&&dmWs.readyState===WebSocket.OPEN) dmWs.send(JSON.stringify({type:'dm_open',target:other}));
+    };
+    c.appendChild(div);
+  });
+}
+
+function renderDmRequests(){
+  const c=document.getElementById('dm-requests-list'); c.innerHTML='';
+  if(!dmRequests.length){
+    c.innerHTML='<div style="text-align:center;color:var(--muted);padding:30px;font-size:13px">Aucune demande en attente</div>';
+    return;
+  }
+  dmRequests.forEach(r=>{
+    const div=document.createElement('div'); div.className='dm-req-item';
+    div.innerHTML=`<div class="dm-av" style="background:var(--surface3);color:var(--accent2)">${r.from_user.slice(0,2).toUpperCase()}</div><div class="dm-info"><div class="dm-name">${esc(r.from_user)}</div><div class="dm-preview">veut chatter avec toi</div></div><div class="dm-req-btns"><button class="dm-req-btn accept" onclick="acceptDm('${r.from_user}')">✓</button><button class="dm-req-btn refuse" onclick="refuseDm('${r.from_user}')">✗</button></div>`;
+    c.appendChild(div);
+  });
+}
+
+function renderDmHistory(messages, target){
+  const c=document.getElementById('dm-messages'); c.innerHTML='';
+  messages.forEach(m=>appendDmMsg(m));
+  setTimeout(()=>{ c.scrollTop=c.scrollHeight; },100);
+}
+
+function appendDmMsg(m){
+  const isMe=m.from_user===myUsername;
+  const c=document.getElementById('dm-messages');
+  const row=document.createElement('div'); row.className='dm-msg'+(isMe?' me':'');
+  row.dataset.dmid=m.id;
+  const initials=(m.from_user||'?').slice(0,2).toUpperCase();
+  const avContent=m.avatar?`<img src="${m.avatar}"/>`:`<span style="color:${m.color||'var(--accent2)'};font-size:10px;font-weight:700">${initials}</span>`;
+  const deletedStyle=m.deleted?'color:var(--muted);font-style:italic':'';
+  row.innerHTML=`
+    <div class="dm-msg-av" style="background:${m.color||'var(--accent)'}22">${avContent}</div>
+    <div>
+      <div class="dm-bubble"><span class="dm-bubble-text" style="${deletedStyle}">${m.deleted?'[message supprimé]':esc(m.text||'')}</span>${isMe&&!m.deleted?`<button style="background:none;border:none;cursor:pointer;font-size:11px;color:rgba(255,255,255,0.6);margin-left:6px" onclick="deleteDmMsg(${m.id},'${currentDmTarget}')">🗑</button>`:''}</div>
+      <div class="dm-time">${m.time||''}</div>
+    </div>`;
+  c.appendChild(row);
+  c.scrollTop=c.scrollHeight;
+}
+
+function openDmChat(target){
+  const chat=document.getElementById('dm-chat');
+  const nameEl=document.getElementById('dm-chat-name');
+  const avEl=document.getElementById('dm-chat-av');
+  nameEl.textContent=target;
+  avEl.innerHTML=`<span style="color:var(--accent2);font-weight:700;font-size:12px">${target.slice(0,2).toUpperCase()}</span>`;
+  avEl.style.background='var(--surface3)';
+  chat.classList.add('open');
+  document.getElementById('dm-msg-input').focus();
+}
+
+function closeDmChat(){
+  document.getElementById('dm-chat').classList.remove('open');
+  currentDmTarget=''; currentDmConvId='';
+}
+
+function sendDmRequest(){
+  const inp=document.getElementById('dm-search-input');
+  const target=inp.value.trim();
+  if(!target){ showToast('Entre un pseudo','error'); return; }
+  connectDmWS();
+  setTimeout(()=>{
+    if(dmWs&&dmWs.readyState===WebSocket.OPEN){
+      dmWs.send(JSON.stringify({type:'dm_request',to:target}));
+      inp.value='';
+    } else showToast('Connexion en cours, réessaie','error');
+  },500);
+}
+
+function acceptDm(fromUser){
+  if(dmWs&&dmWs.readyState===WebSocket.OPEN){
+    dmWs.send(JSON.stringify({type:'dm_accept',from_user:fromUser}));
+    dmRequests=dmRequests.filter(r=>r.from_user!==fromUser);
+    renderDmRequests();
+  }
+}
+
+function refuseDm(fromUser){
+  if(dmWs&&dmWs.readyState===WebSocket.OPEN){
+    dmWs.send(JSON.stringify({type:'dm_refuse',from_user:fromUser}));
+    dmRequests=dmRequests.filter(r=>r.from_user!==fromUser);
+    renderDmRequests();
+  }
+}
+
+function sendDmMsg(){
+  const inp=document.getElementById('dm-msg-input');
+  const text=inp.value.trim();
+  if(!text||!currentDmTarget||!dmWs||dmWs.readyState!==WebSocket.OPEN) return;
+  dmWs.send(JSON.stringify({type:'dm_message',to:currentDmTarget,text}));
+  inp.value='';
+  // Typing indicator
+  let tc=false;
+  inp.oninput=()=>{ if(!tc&&dmWs&&dmWs.readyState===WebSocket.OPEN){ tc=true; dmWs.send(JSON.stringify({type:'dm_typing',to:currentDmTarget})); setTimeout(()=>{tc=false},2000); } };
+}
+
+function deleteDmMsg(msgId, target){
+  if(dmWs&&dmWs.readyState===WebSocket.OPEN) dmWs.send(JSON.stringify({type:'dm_delete',msg_id:msgId,to:target}));
+}
+
+// ══ MOBILE NAV ══
+function mobileNav(tab){
+  document.querySelectorAll('.mobile-nav-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('mob-btn-'+tab)?.classList.add('active');
+  if(tab==='chat'){ closeMobileSidebar(); document.getElementById('dm-panel').classList.remove('open'); document.getElementById('dm-chat').classList.remove('open'); }
+  else if(tab==='mp'){ toggleDmPanel(); }
+  else if(tab==='members'){ openMobileSidebar(); }
+  else if(tab==='settings'){ toggleSettings(); }
+}
+
+function openMobileSidebar(){
+  document.getElementById('mob-sidebar').classList.add('open');
+  document.getElementById('mob-overlay').classList.add('open');
+  // Sync members
+  const src=document.getElementById('members-list');
+  document.getElementById('mob-members-list').innerHTML=src.innerHTML;
+}
+function closeMobileSidebar(){
+  document.getElementById('mob-sidebar').classList.remove('open');
+  document.getElementById('mob-overlay').classList.remove('open');
+  document.querySelectorAll('.mobile-nav-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('mob-btn-chat')?.classList.add('active');
+}
+
+
 function setTheme(t){ document.body.classList.toggle('light',t==='light'); document.getElementById('theme-dark').classList.toggle('active',t==='dark'); document.getElementById('theme-light').classList.toggle('active',t==='light'); localStorage.setItem('cl_theme',t); }
 
 // ══ SOUND ══

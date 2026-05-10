@@ -527,6 +527,172 @@ async def endpoint(ws: WebSocket, room: str, username: str, color: str):
             db_save_message(room, "system", "", sys_text, msg_type="system")
             await mgr.broadcast(room, {"type":"system","text":sys_text,"time":now_time(),"members":mgr.get_members(room),"online":mgr.count(room)})
 
+# ── DM HELPERS ──
+def dm_conv_id(u1, u2):
+    return "__".join(sorted([u1, u2]))
+
+def db_get_dm_history(conv_id, limit=60):
+    try:
+        res = supabase.table("dm_messages").select("*").eq("conversation_id", conv_id).order("id", desc=True).limit(limit).execute()
+        result = []
+        for r in reversed(res.data or []):
+            result.append({
+                "id": r.get("id"), "from_user": r.get("from_user"),
+                "to_user": r.get("to_user"), "text": "[message supprimé]" if r.get("deleted") else r.get("text"),
+                "deleted": r.get("deleted", False), "avatar": r.get("avatar"),
+                "color": r.get("color"),
+                "time": r.get("created_at","")[-8:-3] if r.get("created_at") else ""
+            })
+        return result
+    except Exception as e:
+        print(f"dm_history error: {e}"); return []
+
+def db_save_dm(conv_id, from_user, to_user, text, avatar, color):
+    try:
+        res = supabase.table("dm_messages").insert({
+            "conversation_id": conv_id, "from_user": from_user, "to_user": to_user,
+            "text": text, "avatar": avatar, "color": color,
+            "deleted": False, "created_at": now_full()
+        }).execute()
+        return res.data[0]["id"] if res.data else None
+    except Exception as e:
+        print(f"dm_save error: {e}"); return None
+
+def db_get_dm_request(from_user, to_user):
+    try:
+        res = supabase.table("dm_requests").select("*").eq("from_user", from_user).eq("to_user", to_user).execute()
+        return res.data[0] if res.data else None
+    except: return None
+
+def db_get_my_dms(username):
+    try:
+        res = supabase.table("dm_requests").select("*").or_(
+            f"from_user.eq.{username},to_user.eq.{username}"
+        ).eq("status", "accepted").execute()
+        return res.data or []
+    except: return []
+
+def db_get_pending_requests(username):
+    try:
+        res = supabase.table("dm_requests").select("*").eq("to_user", username).eq("status", "pending").execute()
+        return res.data or []
+    except: return []
+
+# ── DM WEBSOCKET ──
+@app.websocket("/dm/{username}/{color}")
+async def dm_endpoint(ws: WebSocket, username: str, color: str):
+    color = "#" + color
+    if mgr.is_taken(username + "_dm"):
+        await ws.accept()
+        await ws.send_text(json.dumps({"type": "error", "text": "Déjà connecté"}))
+        await ws.close(); return
+
+    await ws.accept()
+    mgr.connected[username + "_dm"] = "dm"
+
+    # Send pending requests
+    pending = db_get_pending_requests(username)
+    if pending:
+        await ws.send_text(json.dumps({"type": "dm_pending_requests", "requests": pending}))
+
+    # Send accepted DMs list
+    dms = db_get_my_dms(username)
+    await ws.send_text(json.dumps({"type": "dm_list", "dms": dms, "my_username": username}))
+
+    try:
+        while True:
+            data = await ws.receive_text()
+            msg = json.loads(data)
+            mtype = msg.get("type")
+
+            if mtype == "dm_request":
+                target = msg.get("to", "").strip()
+                if not target or target == username:
+                    await ws.send_text(json.dumps({"type": "error", "text": "Pseudo invalide."})); continue
+                # Check user exists
+                try:
+                    u = supabase.table("users").select("username").eq("username", target).execute()
+                    if not u.data:
+                        await ws.send_text(json.dumps({"type": "error", "text": f"'{target}' n'existe pas."})); continue
+                except: pass
+                # Check already exists
+                existing = db_get_dm_request(username, target) or db_get_dm_request(target, username)
+                if existing:
+                    if existing.get("status") == "accepted":
+                        await ws.send_text(json.dumps({"type": "error", "text": "Vous avez déjà une conversation."})); continue
+                    elif existing.get("status") == "pending":
+                        await ws.send_text(json.dumps({"type": "error", "text": "Demande déjà envoyée."})); continue
+                try:
+                    supabase.table("dm_requests").insert({
+                        "from_user": username, "to_user": target,
+                        "status": "pending", "created_at": now_full()
+                    }).execute()
+                    await ws.send_text(json.dumps({"type": "info", "text": f"Demande envoyée à {target} !"}))
+                    # Notify target if online
+                    await mgr.send_to(target + "_dm", {"type": "dm_new_request", "from_user": username})
+                except:
+                    await ws.send_text(json.dumps({"type": "error", "text": "Erreur lors de l'envoi."}))
+
+            elif mtype == "dm_accept":
+                from_user = msg.get("from_user", "").strip()
+                try:
+                    supabase.table("dm_requests").update({"status": "accepted"}).eq("from_user", from_user).eq("to_user", username).execute()
+                    await ws.send_text(json.dumps({"type": "info", "text": f"Tu peux maintenant chatter avec {from_user} !"}))
+                    dms = db_get_my_dms(username)
+                    await ws.send_text(json.dumps({"type": "dm_list", "dms": dms, "my_username": username}))
+                    await mgr.send_to(from_user + "_dm", {"type": "dm_accepted", "by": username})
+                except: pass
+
+            elif mtype == "dm_refuse":
+                from_user = msg.get("from_user", "").strip()
+                try:
+                    supabase.table("dm_requests").update({"status": "refused"}).eq("from_user", from_user).eq("to_user", username).execute()
+                    await ws.send_text(json.dumps({"type": "info", "text": f"Demande de {from_user} refusée."}))
+                except: pass
+
+            elif mtype == "dm_open":
+                target = msg.get("target", "").strip()
+                conv_id = dm_conv_id(username, target)
+                history = db_get_dm_history(conv_id)
+                await ws.send_text(json.dumps({"type": "dm_history", "messages": history, "target": target, "conv_id": conv_id}))
+
+            elif mtype == "dm_message":
+                target = msg.get("to", "").strip()
+                text = msg.get("text", "").strip()
+                if not text or not target: continue
+                # Check accepted
+                req = db_get_dm_request(username, target) or db_get_dm_request(target, username)
+                if not req or req.get("status") != "accepted":
+                    await ws.send_text(json.dumps({"type": "error", "text": "Pas de conversation active."})); continue
+                conv_id = dm_conv_id(username, target)
+                try:
+                    u = supabase.table("users").select("avatar,color").eq("username", username).execute()
+                    udata = u.data[0] if u.data else {}
+                except: udata = {}
+                msg_id = db_save_dm(conv_id, username, target, text, udata.get("avatar"), udata.get("color", color))
+                payload = {"type": "dm_message", "id": msg_id, "from_user": username, "to_user": target, "text": text, "time": now_time(), "avatar": udata.get("avatar"), "color": udata.get("color", color), "conv_id": conv_id}
+                await ws.send_text(json.dumps(payload))
+                await mgr.send_to(target + "_dm", payload)
+
+            elif mtype == "dm_typing":
+                target = msg.get("to", "").strip()
+                await mgr.send_to(target + "_dm", {"type": "dm_typing", "from_user": username})
+
+            elif mtype == "dm_delete":
+                msg_id = msg.get("msg_id")
+                try:
+                    supabase.table("dm_messages").update({"deleted": True}).eq("id", msg_id).eq("from_user", username).execute()
+                    target = msg.get("to", "").strip()
+                    conv_id = dm_conv_id(username, target)
+                    payload = {"type": "dm_deleted", "msg_id": msg_id, "conv_id": conv_id}
+                    await ws.send_text(json.dumps(payload))
+                    await mgr.send_to(target + "_dm", payload)
+                except: pass
+
+    except WebSocketDisconnect:
+        if username + "_dm" in mgr.connected:
+            del mgr.connected[username + "_dm"]
+
 @app.get("/")
 async def root():
     with open("index.html","r",encoding="utf-8") as f:
