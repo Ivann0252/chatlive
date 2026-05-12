@@ -279,9 +279,12 @@ async def auth_callback(code: str = None, error: str = None):
 async def ws_main(ws: WebSocket, room: str, username: str, color: str):
     color = "#" + color
     if mgr.is_taken(username):
-        await ws.accept()
-        await ws.send_text(json.dumps({"type":"error","code":"username_taken","text":f"'{username}' est déjà connecté."}))
-        await ws.close(); return
+        # Force disconnect old session and allow reconnect
+        old_room = mgr.connected.get(username)
+        if old_room and old_room in mgr.rooms:
+            mgr.rooms[old_room] = [c for c in mgr.rooms[old_room] if c["username"] != username]
+        if username in mgr.connected:
+            del mgr.connected[username]
     if db_is_banned(room, username):
         await ws.accept()
         await ws.send_text(json.dumps({"type":"error","code":"banned","text":"Tu as été banni de ce salon."}))
