@@ -348,9 +348,17 @@ async def ws_main(ws: WebSocket, room: str, username: str, color: str):
     if pinned: await ws.send_text(json.dumps({"type": "pinned", "message": pinned}))
 
     # Welcome + room info (only for this user)
-    room_data_res = supabase.table("rooms").select("label,welcome_msg").eq("name", room).execute()
-    room_label = room_data_res.data[0].get("label", room) if room_data_res.data else room
-    welcome_msg = room_data_res.data[0].get("welcome_msg") if room_data_res.data else None
+    try:
+        room_data_res = supabase.table("rooms").select("label,welcome_msg").eq("name", room).execute()
+        room_label = room_data_res.data[0].get("label", room) if room_data_res.data else room
+        welcome_msg = room_data_res.data[0].get("welcome_msg") if room_data_res.data else None
+    except:
+        try:
+            room_data_res = supabase.table("rooms").select("label").eq("name", room).execute()
+            room_label = room_data_res.data[0].get("label", room) if room_data_res.data else room
+        except:
+            room_label = room
+        welcome_msg = None
     await ws.send_text(json.dumps({"type": "self_join", "room_label": room_label, "welcome_msg": welcome_msg}))
 
     # Broadcast join to others
