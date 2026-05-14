@@ -808,9 +808,7 @@ function showToast(text,type=''){
   t.textContent=text;t.className=type?type:'';t.classList.add('show');
   clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),3200);
 }
-function sendWS(msg){if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(msg))}
-
-// ══ SESSION ══
+function sendDmWS(msg){if(dmWs&&dmWs.readyState===WebSocket.OPEN)dmWs.send(JSON.stringify(msg))}
 function saveSession(){localStorage.setItem('cl_s',JSON.stringify({username:myUsername,color:myColor,accent:myAccent,avatar:myAvatar,room:currentRoom}))}
 function loadSession(){try{return JSON.parse(localStorage.getItem('cl_s'))}catch(e){return null}}
 function clearSession(){localStorage.removeItem('cl_s')}
@@ -898,6 +896,7 @@ function updateAvatarUI(){
 }
 
 // ══ WS ══
+let wsQueue=[];
 function connectWS(){
   if(wsConnecting)return;
   wsConnecting=true;
@@ -905,10 +904,23 @@ function connectWS(){
   const proto=location.protocol==='https:'?'wss':'ws';
   const colorHex=myColor.replace('#','');
   ws=new WebSocket(`${proto}://${location.host}/ws/${encodeURIComponent(currentRoom)}/${encodeURIComponent(myUsername)}/${colorHex}`);
-  ws.onopen=()=>{wsConnecting=false;saveSession()};
+  ws.onopen=()=>{
+    wsConnecting=false;saveSession();
+    // Flush queue
+    while(wsQueue.length>0){const m=wsQueue.shift();if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(m))}
+  };
   ws.onclose=()=>{wsConnecting=false;ws=null;setTimeout(()=>{if(!ws)connectWS()},3000)};
   ws.onerror=()=>{wsConnecting=false};
   ws.onmessage=e=>{try{handleMsg(JSON.parse(e.data))}catch(err){console.error('msg parse error',err)}};
+}
+
+function sendWS(msg){
+  if(ws&&ws.readyState===WebSocket.OPEN){
+    ws.send(JSON.stringify(msg));
+  } else {
+    // Queue non-typing messages
+    if(msg.type!=='typing'){wsQueue.push(msg);connectWS()}
+  }
 }
 
 // ══ HANDLE MESSAGES ══
@@ -1181,7 +1193,6 @@ function sendMsg(){
   const inp=document.getElementById('msg-input');
   const text=inp.value.trim();
   if(!text&&!pendingFile)return;
-  if(!ws||ws.readyState!==WebSocket.OPEN){showToast('Connexion en cours...','info');return}
   const payload={type:'message',text:text||''};
   if(replyTo)payload.reply_to={username:replyTo.username,text:replyTo.text};
   if(pendingFile){payload.file_url=pendingFile.data;payload.file_type=pendingFile.type;pendingFile=null}
