@@ -356,9 +356,14 @@ body.light{--bg:#f0f2f5;--surface:#fff;--surface2:#f0f1f4;--surface3:#e4e6eb;--b
 @media(max-width:768px){
   .sidebar{display:none}.online-badge{display:none}
   .dm-fab{display:none!important}.mobile-nav{display:block}
-  #app{padding-bottom:65px}.room-pills{max-width:calc(100vw - 110px)}
+  #app{padding-bottom:0}.room-pills{max-width:calc(100vw - 110px)}
   #dm-panel,#dm-chat{width:100%;border-left:none}
-  .topbar{padding:8px 10px}.input-bar{padding:8px 10px}
+  .topbar{padding:8px 10px}
+  .messages-wrap{padding-bottom:120px}
+  #messages{overflow-y:auto}
+  .input-bar{position:fixed;bottom:65px;left:0;right:0;z-index:30;padding:8px 10px;border-top:1px solid var(--accent)}
+  .typing-row{position:fixed;bottom:115px;left:0;right:0;z-index:29;background:var(--bg);padding:0 10px}
+  #reply-bar{position:fixed;bottom:115px;left:0;right:0;z-index:29;background:var(--surface2)}
 }
 @media(min-width:769px){
   .dm-fab{display:flex!important}.mobile-nav{display:none!important}.mob-sidebar{display:none}
