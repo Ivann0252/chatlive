@@ -359,11 +359,10 @@ body.light{--bg:#f0f2f5;--surface:#fff;--surface2:#f0f1f4;--surface3:#e4e6eb;--b
   #app{padding-bottom:0}.room-pills{max-width:calc(100vw - 110px)}
   #dm-panel,#dm-chat{width:100%;border-left:none}
   .topbar{padding:8px 10px}
-  .messages-wrap{padding-bottom:120px}
-  #messages{overflow-y:auto}
+  #messages{padding-bottom:140px}
   .input-bar{position:fixed;bottom:65px;left:0;right:0;z-index:30;padding:8px 10px;border-top:1px solid var(--accent)}
-  .typing-row{position:fixed;bottom:115px;left:0;right:0;z-index:29;background:var(--bg);padding:0 10px}
-  #reply-bar{position:fixed;bottom:115px;left:0;right:0;z-index:29;background:var(--surface2)}
+  .typing-row{position:fixed;bottom:118px;left:0;right:0;z-index:29;background:var(--bg);padding:0 10px}
+  #reply-bar{position:fixed;bottom:118px;left:0;right:0;z-index:29;background:var(--surface2)}
 }
 @media(min-width:769px){
   .dm-fab{display:flex!important}.mobile-nav{display:none!important}.mob-sidebar{display:none}
@@ -806,7 +805,7 @@ let mySettings={notif_mentions:true,notif_messages:true,notif_dm:true,notif_requ
 
 // ══ UTILS ══
 function esc(t){return String(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function scrollBottom(){const c=document.getElementById('messages');if(c)c.scrollTop=c.scrollHeight}
+function scrollBottom(){const c=document.getElementById('messages');if(c){c.scrollTop=c.scrollHeight+200}}
 let toastTimer;
 function showToast(text,type=''){
   const t=document.getElementById('toast');
